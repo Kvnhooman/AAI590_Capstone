@@ -1,5 +1,3 @@
-# AAI590_Capstone
-
 # Modeling pipeline — Cross-Domain NER under Label Scarcity
 
 This folder holds the full, ordered notebook pipeline for the capstone. It answers one
@@ -16,6 +14,36 @@ Three adaptation strategies (the paper's three "arms") are compared:
 | 1  | Few-shot fine-tuning | `05` (+ `06a`→`06b`, a mitigation ablation) |
 | 2  | Domain-adaptive pretraining (DAP) + few-shot fine-tuning | `07` → `08` |
 | 3  | LLM prompting, no fine-tuning | `09` |
+
+## Results at a glance
+
+The full pipeline has been run end-to-end; all outputs live under `results/` on Drive.
+
+- **Baseline (04):** CoNLL-2003 in-domain F1 **0.91**; zero-shot cross-domain boundary F1 drops
+  to **0.61** (WNUT) / **0.07** (SciERC) — the degradation the study is about.
+- **Headline (typed F1, budgets 50→200):** under tiny label budgets, **LLM prompting (Arm 3,
+  `gpt-4o-mini`) beats both fine-tuning arms on both domains** and is roughly *flat* with budget,
+  while fine-tuning *rises* — a clear data-efficiency crossover.
+
+  | | WNUT 50/100/200 | SciERC 50/100/200 |
+  |---|---|---|
+  | Few-shot FT (Arm 1) | 0.30 / 0.35 / 0.40 | 0.15 / 0.24 / 0.37 |
+  | DAP + FT (Arm 2) | 0.15 / 0.33 / 0.38 | 0.11 / 0.22 / 0.36 |
+  | **LLM prompting (Arm 3)** | **0.45 / 0.45 / 0.46** | **0.40 / 0.43 / 0.44** |
+
+- **DAP did not help:** Arm 2 ≈ Arm 1 (slightly lower), so domain-adaptive pretraining added no
+  benefit at these budgets.
+- **Per-type reversal (the key finding):** contrary to the hypothesis, the LLM is *strongest on
+  the rare/specialized types* where fine-tuning collapses (SciERC `Metric` 0.41 vs 0.01, WNUT
+  `product` 0.28 vs 0.04); fine-tuning only stays ahead on the single dominant type per domain
+  (WNUT `person`, SciERC `Generic`).
+- **Cost trade-off:** the LLM costs ~$0.16–1.06 per config (full-test *inference*) vs ~$0.01 for
+  a fine-tuning run (one-time *training*) — different cost types, so fine-tuning amortizes far
+  better at deployment scale. Total Arm 3 spend was ~$3.
+
+> Numbers are typed micro-F1 on the full target test set; fine-tuning arms are means over seeds
+> 13/42/101, the LLM arm is a single-seed (42) point estimate. See `summary_typed_f1_by_method_budget.csv`
+> and `per_type_f1_*.csv` for the exact values.
 
 ## Run order
 
