@@ -41,6 +41,19 @@ The full pipeline has been run end-to-end; all outputs live under `results/` on 
   a fine-tuning run (one-time *training*) — different cost types, so fine-tuning amortizes far
   better at deployment scale. Total Arm 3 spend was ~$3.
 
+**Supplementary analyses (09b / 09c / 11):**
+
+- **Zero-shot probe (09b):** on WNUT the LLM's zero-shot typed F1 (0.48) *matches* its few-shot
+  score — demonstrations add nothing, so its WNUT ability rests on pretrained knowledge (and a
+  contamination caveat, since WNUT is an old public benchmark). On SciERC zero-shot (0.32) is well
+  below few-shot (0.40–0.44), so there the demos drive genuine in-context learning.
+- **Retrieval demos (09c, GPT-NER-style):** picking each test sentence's 15 nearest labeled demos
+  beats fixed demos — WNUT rises to 0.51–0.52 (from 0.45–0.46), SciERC to 0.42–0.45 — and is
+  *cheaper* at large budgets (WNUT-200 $0.20 vs $1.06), since it sends 15 demos instead of 200.
+- **Type-routed oracle hybrid (11):** routing each entity type to its best arm lifts typed F1 by
+  only ~0.03–0.04 over the LLM at budgets 100/200 (none at 50). The LLM is already near the
+  ceiling; a LinkNER-style router (Zhang et al., 2024) would help only where the last points matter.
+
 > Numbers are typed micro-F1 on the full target test set; fine-tuning arms are means over seeds
 > 13/42/101, the LLM arm is a single-seed (42) point estimate. See `summary_typed_f1_by_method_budget.csv`
 > and `per_type_f1_*.csv` for the exact values.
@@ -57,6 +70,8 @@ uses outputs written by lower-numbered notebooks. Everything reads/writes Google
                           ├─→ 06a→06b │
                           └─→ 07 → 08 ─┼─→ 10
                               09 ───────┘
+
+supplementary:  09 → 09b, 09c   ·   05/08/09 → 11
 ```
 
 - `04` (baseline) is the hub: arms 1, 2, and DAP all start from it.
@@ -64,6 +79,9 @@ uses outputs written by lower-numbered notebooks. Everything reads/writes Google
 - `10` requires every arm you want to appear in the final figures; missing arms are skipped
   with a warning, so you can run it early to check partial progress.
 - `01` is analysis-only (nothing downstream depends on it).
+- **Supplementary:** `09b` (zero-shot) and `09c` (retrieval) are variants of `09` and write to
+  their own result files; `11` (hybrid) reads the per-type results of `05`/`08`/`09` and needs no
+  training or API calls. All three are optional extensions, independent of the core `00 → 10` path.
 
 ## What each notebook does
 
@@ -81,6 +99,9 @@ uses outputs written by lower-numbered notebooks. Everything reads/writes Google
 | 08 | `08_dap_fewshot_finetune` | **Arm 2, stage B.** Identical recipe to 05, but starting from the DAP encoder — isolating the single DAP variable. Prints an Arm 1 vs Arm 2 gain table. | `models/dap_<ds>`, tokenized few-shot | `results/dap_fewshot/` |
 | 09 | `09_llm_prompting_eval` | **Arm 3.** Prompt an LLM (OpenAI `gpt-4o-mini`, with automatic prompt caching + rate-limit retry; free local fallback if no key) using the same few-shot examples as in-context demos, no training. Scored with the same metric on the full test set. Single demo seed (42). | raw test, `fewshot_splits` | `results/llm_prompting/` |
 | 10 | `10_results_aggregation` | Combine every arm into the headline deliverables: **data-efficiency curve**, **cost-performance** plot, and **per-entity-type** breakdown. | all `results/*` | `combined_results.csv`, `summary_*.csv`, `*.png`, `per_type_f1_*.csv` |
+| 09b | `09b_llm_zeroshot` | **Extension — contamination probe.** Arm 3 with **no demonstrations** (`budget=0`); tests how much the LLM relies on pretrained knowledge. Appends `budget=0` rows so 10 picks them up. | raw test, LLM API | `results/llm_prompting/` (budget 0) |
+| 09c | `09c_llm_retrieval_demos` | **Extension — GPT-NER retrieval.** Selects each test sentence's 15 nearest labeled demos (MiniLM embeddings) instead of fixed ones. Separate result file, comparable to Arm 3. | raw test, `fewshot_splits`, LLM API | `results/llm_prompting/llm_retrieval_results.csv` |
+| 11 | `11_hybrid_analysis` | **Extension — type-routed oracle hybrid.** Reads per-type results and routes each entity type to its best arm; quantifies head-room for a LinkNER-style combiner. No training / API. | `results/{fewshot,dap_fewshot,llm_prompting}/*` | `hybrid_oracle_*.csv`, `hybrid_oracle.png` |
 
 `ner_common_utils.py` is a legacy helper from an earlier version of the pipeline; the current
 notebooks (00–10) are self-contained and do **not** import it. It's kept for reference only.
