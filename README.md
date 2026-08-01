@@ -3,9 +3,10 @@
 This folder holds the full, ordered notebook pipeline for the capstone. It answers one
 practical question: **given a fixed annotation budget in a new domain, which adaptation
 strategy should you use?** We train a `bert-base-cased` NER baseline on **CoNLL-2003**
-(newswire) and adapt it to two target domains — **WNUT-17** (social media) and **SciERC**
-(scientific abstracts) — under matched budgets of **50 / 100 / 200** labeled sentences and
-fixed seeds **13 / 42 / 101**.
+(newswire) and adapt it to target domains under matched budgets of **50 / 100 / 200** labeled
+sentences and fixed seeds **13 / 42 / 101**. The core three-arm comparison runs on two target
+domains — **WNUT-17** (social media) and **SciERC** (scientific abstracts) — and an extension
+adds a third, **JNLPBA** (biomedical), as an external-validity check.
 
 Three adaptation strategies (the paper's three "arms") are compared:
 
@@ -20,151 +21,146 @@ Three adaptation strategies (the paper's three "arms") are compared:
 The full pipeline has been run end-to-end; all outputs live under `results/` on Drive.
 
 - **Baseline (04):** CoNLL-2003 in-domain F1 **0.91**; zero-shot cross-domain boundary F1 drops
-  to **0.61** (WNUT) / **0.07** (SciERC) — the degradation the study is about.
-- **Headline (typed F1, budgets 50→200):** under tiny label budgets, **LLM prompting (Arm 3,
-  `gpt-4o-mini`) beats both fine-tuning arms on both domains** and is roughly *flat* with budget,
-  while fine-tuning *rises* — a clear data-efficiency crossover.
+  to **0.61** (WNUT) / **0.07** (SciERC) / **0.27** (JNLPBA) — the degradation the study is about.
+- **Headline (typed F1, budgets 50→200):** under tiny label budgets, **LLM prompting
+  (`gpt-4o-mini`) beats fine-tuning on all three domains**, and is roughly *flat* with budget
+  while fine-tuning *rises* — a data-efficiency crossover replicated across domains.
 
-  | | WNUT 50/100/200 | SciERC 50/100/200 |
-  |---|---|---|
-  | Few-shot FT (Arm 1) | 0.30 / 0.35 / 0.40 | 0.15 / 0.24 / 0.37 |
-  | DAP + FT (Arm 2) | 0.15 / 0.33 / 0.38 | 0.11 / 0.22 / 0.36 |
-  | **LLM prompting (Arm 3)** | **0.45 / 0.45 / 0.46** | **0.40 / 0.43 / 0.44** |
+  | | WNUT 50/100/200 | SciERC 50/100/200 | JNLPBA 50/100/200 |
+  |---|---|---|---|
+  | Few-shot FT (Arm 1) | 0.30 / 0.35 / 0.40 | 0.15 / 0.24 / 0.37 | 0.31 / 0.39 / 0.51 |
+  | DAP + FT (Arm 2) | 0.15 / 0.33 / 0.38 | 0.11 / 0.22 / 0.36 | — |
+  | **LLM prompting (Arm 3)** | **0.45 / 0.45 / 0.46** | **0.40 / 0.43 / 0.44** | **0.57 / 0.57 / 0.58** |
 
-- **DAP did not help:** Arm 2 ≈ Arm 1 (slightly lower), so domain-adaptive pretraining added no
-  benefit at these budgets.
-- **Per-type reversal (the key finding):** contrary to the hypothesis, the LLM is *strongest on
-  the rare/specialized types* where fine-tuning collapses (SciERC `Metric` 0.41 vs 0.01, WNUT
-  `product` 0.28 vs 0.04); fine-tuning only stays ahead on the single dominant type per domain
-  (WNUT `person`, SciERC `Generic`).
-- **Cost trade-off:** the LLM costs ~$0.16–1.06 per config (full-test *inference*) vs ~$0.01 for
-  a fine-tuning run (one-time *training*) — different cost types, so fine-tuning amortizes far
-  better at deployment scale. Total Arm 3 spend was ~$3.
+- **The crossover is consistent:** the LLM's lead is ~**+0.25** at budget 50 and narrows to
+  ~**+0.06** at budget 200 in every domain — fastest on JNLPBA, the most learnable for fine-tuning.
+- **DAP did not help:** Arm 2 ≈ Arm 1 (slightly lower) on WNUT/SciERC — even though DAP used the
+  *full* unlabeled training split (thousands of sentences), extra in-domain text was not the
+  limiting factor at these budgets.
+- **Per-type reversal (a key finding):** contrary to the hypothesis, the LLM is *strongest on the
+  rare/specialized types* where fine-tuning collapses (SciERC `Metric` 0.41 vs 0.01, WNUT
+  `product` 0.28 vs 0.04, JNLPBA `RNA` 0.61 vs 0.03). Fine-tuning stays ahead only on the single
+  dominant type per domain (WNUT `person`, SciERC `Generic`); on JNLPBA the LLM wins every type.
+- **Contamination probe (12) — the LLM's edge is brittle:** when entities are replaced with novel
+  character-perturbed surface forms (spans/types/context unchanged), the LLM's F1 *collapses* —
+  WNUT 0.46→0.19, SciERC 0.44→**0.02** — and falls **below** the fine-tuning control on the same
+  perturbed data (which drops far less). So the LLM's advantage rests substantially on
+  recognizing *known* entity strings (plausibly pretraining exposure to these public benchmarks),
+  and fine-tuning is the more robust choice for domains dominated by novel/emerging entities.
+- **Cost trade-off:** the LLM costs ~$0.16–1.06 per config (ongoing per-inference API cost) vs
+  ~$0.01 for a fine-tuning run (one-time training, then near-free inference) — so fine-tuning
+  amortizes far better at deployment scale.
 
 **Supplementary analyses (09b / 09c / 11):**
 
-- **Zero-shot probe (09b):** on WNUT the LLM's zero-shot typed F1 (0.48) *matches* its few-shot
-  score — demonstrations add nothing, so its WNUT ability rests on pretrained knowledge (and a
-  contamination caveat, since WNUT is an old public benchmark). On SciERC zero-shot (0.32) is well
-  below few-shot (0.40–0.44), so there the demos drive genuine in-context learning.
-- **Retrieval demos (09c, GPT-NER-style):** picking each test sentence's 15 nearest labeled demos
-  beats fixed demos — WNUT rises to 0.51–0.52 (from 0.45–0.46), SciERC to 0.42–0.45 — and is
-  *cheaper* at large budgets (WNUT-200 $0.20 vs $1.06), since it sends 15 demos instead of 200.
-- **Type-routed oracle hybrid (11):** routing each entity type to its best arm lifts typed F1 by
-  only ~0.03–0.04 over the LLM at budgets 100/200 (none at 50). The LLM is already near the
-  ceiling; a LinkNER-style router (Zhang et al., 2024) would help only where the last points matter.
+- **Zero-shot probe (09b):** on WNUT, zero-shot ≈ few-shot (demos add nothing → knowledge-driven);
+  on SciERC, few-shot ≫ zero-shot (demos drive genuine in-context learning).
+- **Retrieval demos (09c, GPT-NER-style):** kNN-selected demos beat fixed demos (WNUT 0.45→0.51)
+  and are cheaper at large budgets.
+- **Type-routed oracle hybrid (11):** routing each type to its best arm lifts typed F1 only
+  ~0.03–0.04 over the LLM — it's already near the achievable ceiling.
 
-> Numbers are typed micro-F1 on the full target test set; fine-tuning arms are means over seeds
-> 13/42/101, the LLM arm is a single-seed (42) point estimate. See `summary_typed_f1_by_method_budget.csv`
-> and `per_type_f1_*.csv` for the exact values.
+> Numbers are typed micro-F1; WNUT/SciERC on the full test set (fine-tuning means over seeds
+> 13/42/101; LLM single-seed 42). JNLPBA fine-tuning and LLM are both scored on a matched,
+> representative **800-sentence** test subset (cost cap); JNLPBA has Arms 1 and 3 only. Exact
+> values are in `results/**/…csv` and `results/three_domain/`.
 
 ## Run order
 
-Run **top to bottom, 00 → 10**. The numbering is the dependency order: each notebook only
-uses outputs written by lower-numbered notebooks. Everything reads/writes Google Drive at
-`/content/drive/MyDrive/AAI590/data/processed` (set up by notebook 00).
+Run **top to bottom**. The numbering is the dependency order: each notebook only uses outputs
+written by lower-numbered notebooks. Everything reads/writes Google Drive at
+`/content/drive/MyDrive/AAI590/data/processed` (set up by notebook `00a`).
 
 ```
-00  →  01
-        02  →  03  →  04  ┬─→ 05 ─┐
-                          ├─→ 06a→06b │
-                          └─→ 07 → 08 ─┼─→ 10
-                              09 ───────┘
-
-supplementary:  09 → 09b, 09c   ·   05/08/09 → 11
+core:            00a → 01
+                  02 → 03 → 04 ┬─→ 05 ─┐
+                               ├─→ 06a → 06b │
+                               └─→ 07 → 08 ─┼─→ 10
+                                   09 ───────┘
+extensions:      09 → 09b, 09c   ·   05/08/09 → 11   ·   05/09 → 12 (contamination)
+biomedical (3rd domain):   00b → 13 → 14 → 15
 ```
 
 - `04` (baseline) is the hub: arms 1, 2, and DAP all start from it.
-- `08` requires `07` (needs the DAP checkpoints).
-- `10` requires every arm you want to appear in the final figures; missing arms are skipped
-  with a warning, so you can run it early to check partial progress.
-- `01` is analysis-only (nothing downstream depends on it).
-- **Supplementary:** `09b` (zero-shot) and `09c` (retrieval) are variants of `09` and write to
-  their own result files; `11` (hybrid) reads the per-type results of `05`/`08`/`09` and needs no
-  training or API calls. All three are optional extensions, independent of the core `00 → 10` path.
+- `08` requires `07` (DAP checkpoints); `10` aggregates whatever arms have run.
+- `01` is analysis-only. All extension notebooks are optional and don't modify the core outputs.
+- **Biomedical track:** `00b` collects JNLPBA; `13` does prep + zero-shot + fine-tuning; `14` runs
+  the LLM arm; `15` unifies all three domains. These write only under `results/jnlpba/` and
+  `results/three_domain/`, leaving the WNUT/SciERC results untouched.
 
 ## What each notebook does
 
-| # | Notebook | Purpose | Reads | Writes |
-|---|----------|---------|-------|--------|
-| 00 | `00_collect_datasets_colab` | Download CoNLL-2003, WNUT-17, SciERC; convert to a common sentence-level JSONL schema (`tokens`, `tags`, `source_dataset`, `split`). | public URLs | `<ds>/<ds>_{train,validation,test}.jsonl`, `collection_report.json` |
-| 01 | `01_eda_ner` | Exploratory analysis: entity-token rates, sentence/span lengths, vocab overlap vs CoNLL, rare-class and few-shot coverage checks. Produces the paper's Table 1 & 2 numbers. | processed JSONL | `eda_summary.json`, figures |
-| 02 | `02_make_fewshot_splits` | Build the **deterministic** few-shot training subsets (50/100/200 × seeds 13/42/101) for WNUT-17 and SciERC. Reused unchanged by every fine-tuning/prompting arm. | `<ds>/<ds>_train.jsonl` | `fewshot_splits/<ds>/<ds>_train_{budget}_seed_{seed}.jsonl`, `manifest.csv` |
-| 03 | `03_tokenize_and_align` | BERT subword tokenization + BIO label alignment (`-100` on continuation subwords / special tokens); builds per-dataset label maps. Tokenizes CoNLL (all splits), WNUT/SciERC (val+test), and every few-shot split. | processed + `fewshot_splits` | `tokenized/...`, `label_maps/<ds>_label_map.json` |
-| 04 | `04_train_baseline` | Fine-tune `bert-base-cased` on CoNLL-2003 (lr 2e-5, 3 epochs). Report in-domain F1 and **zero-shot cross-domain** entity-boundary F1 on WNUT/SciERC. | `tokenized/conll2003`, label maps | `models/baseline_conll2003/`, `results/baseline_results.json` |
-| 05 | `05_fewshot_finetune` | **Arm 1.** Transfer the baseline encoder + fresh head, few-shot fine-tune across the full 18-run grid (2 datasets × 3 budgets × 3 seeds). Reports typed F1, boundary F1, and per-type F1. | baseline, tokenized few-shot | `results/fewshot/` |
-| 06a | `06a_mitigated_fewshot_finetune` | **Arm 1b — first attempt (superseded).** Catastrophic-forgetting mitigation with an over-conservative encoder LR (`5e-6`) + 2-epoch freeze. Underfit and scored *below* naive 05. Kept to document the thought process; not used in the final results. | baseline, tokenized few-shot | `results/mitigated/` |
-| 06b | `06b_mitigated_fewshot_finetune_retuned` | **Arm 1b — retuned (the version used).** Same mitigation, but encoder LR raised to `2e-5` and freeze shortened to 1 epoch. Fixes the underfitting; result: it matches 05 but does *not* recover WNUT above zero-shot, so the regression is intrinsic, not a forgetting artifact. | baseline, tokenized few-shot | `results/mitigated_retuned/` |
-| 07 | `07_domain_adaptive_pretraining` | **Arm 2, stage A.** Continue masked-LM pretraining of the baseline encoder on each target domain's **unlabeled** train text. Tracks perplexity + wall-clock. | baseline, raw target train text | `models/dap_<ds>/`, `results/dap_training_info.json` |
-| 08 | `08_dap_fewshot_finetune` | **Arm 2, stage B.** Identical recipe to 05, but starting from the DAP encoder — isolating the single DAP variable. Prints an Arm 1 vs Arm 2 gain table. | `models/dap_<ds>`, tokenized few-shot | `results/dap_fewshot/` |
-| 09 | `09_llm_prompting_eval` | **Arm 3.** Prompt an LLM (OpenAI `gpt-4o-mini`, with automatic prompt caching + rate-limit retry; free local fallback if no key) using the same few-shot examples as in-context demos, no training. Scored with the same metric on the full test set. Single demo seed (42). | raw test, `fewshot_splits` | `results/llm_prompting/` |
-| 10 | `10_results_aggregation` | Combine every arm into the headline deliverables: **data-efficiency curve**, **cost-performance** plot, and **per-entity-type** breakdown. | all `results/*` | `combined_results.csv`, `summary_*.csv`, `*.png`, `per_type_f1_*.csv` |
-| 09b | `09b_llm_zeroshot` | **Extension — contamination probe.** Arm 3 with **no demonstrations** (`budget=0`); tests how much the LLM relies on pretrained knowledge. Appends `budget=0` rows so 10 picks them up. | raw test, LLM API | `results/llm_prompting/` (budget 0) |
-| 09c | `09c_llm_retrieval_demos` | **Extension — GPT-NER retrieval.** Selects each test sentence's 15 nearest labeled demos (MiniLM embeddings) instead of fixed ones. Separate result file, comparable to Arm 3. | raw test, `fewshot_splits`, LLM API | `results/llm_prompting/llm_retrieval_results.csv` |
-| 11 | `11_hybrid_analysis` | **Extension — type-routed oracle hybrid.** Reads per-type results and routes each entity type to its best arm; quantifies head-room for a LinkNER-style combiner. No training / API. | `results/{fewshot,dap_fewshot,llm_prompting}/*` | `hybrid_oracle_*.csv`, `hybrid_oracle.png` |
+| # | Notebook | Purpose | Writes |
+|---|----------|---------|--------|
+| 00a | `00a_collect_datasets_colab` | Download CoNLL-2003, WNUT-17, SciERC; convert to a common sentence-level JSONL schema. | `<ds>/<ds>_{train,validation,test}.jsonl` |
+| 00b | `00b_collect_biomedical` | **Extension.** Download + standardize JNLPBA (biomedical; 5 types) into the same schema. | `jnlpba/jnlpba_*.jsonl` |
+| 01 | `01_eda_ner` | EDA: entity-token rates, lengths, vocab overlap, few-shot coverage. Produces Table 1 & 2 numbers. | `eda_summary.json`, figures |
+| 02 | `02_make_fewshot_splits` | Deterministic few-shot subsets (50/100/200 × seeds 13/42/101). | `fewshot_splits/…` |
+| 03 | `03_tokenize_and_align` | BERT subword tokenization + BIO alignment; per-dataset label maps. | `tokenized/…`, `label_maps/…` |
+| 04 | `04_train_baseline` | Fine-tune `bert-base-cased` on CoNLL-2003; in-domain + zero-shot cross-domain F1. | `models/baseline_conll2003/`, `results/baseline_results.json` |
+| 05 | `05_fewshot_finetune` | **Arm 1.** Transfer encoder + fresh head, few-shot fine-tune (18-run grid). Typed/boundary/per-type F1. | `results/fewshot/` |
+| 06a | `06a_mitigated_fewshot_finetune` | **Arm 1b — first attempt (superseded).** Mitigation with too-low encoder LR → underfit. Kept to document the process. | `results/mitigated/` |
+| 06b | `06b_mitigated_fewshot_finetune_retuned` | **Arm 1b — retuned (used).** Matches 05 but doesn't recover WNUT above zero-shot → regression is intrinsic, not forgetting. | `results/mitigated_retuned/` |
+| 07 | `07_domain_adaptive_pretraining` | **Arm 2a.** Continue MLM pretraining on unlabeled target text. | `models/dap_<ds>/`, `results/dap_training_info.json` |
+| 08 | `08_dap_fewshot_finetune` | **Arm 2b.** Same recipe as 05 from the DAP encoder — isolates the DAP effect. | `results/dap_fewshot/` |
+| 09 | `09_llm_prompting_eval` | **Arm 3.** LLM prompting (OpenAI `gpt-4o-mini`, prompt caching + retry; free local fallback). | `results/llm_prompting/` |
+| 09b | `09b_llm_zeroshot` | **Extension — contamination/prior probe.** Arm 3 with no demonstrations. | `results/llm_prompting/` (budget 0) |
+| 09c | `09c_llm_retrieval_demos` | **Extension — GPT-NER retrieval.** kNN-selected demos (MiniLM). | `results/llm_prompting/llm_retrieval_results.csv` |
+| 10 | `10_results_aggregation` | WNUT/SciERC deliverables: data-efficiency curve, cost-performance, per-type. | `combined_results.csv`, `*.png`, … |
+| 11 | `11_hybrid_analysis` | **Extension — oracle type-routed hybrid.** Head-room for a LinkNER-style combiner. | `hybrid_oracle_*.csv/png` |
+| 12 | `12_contamination_counterfactual` | **Extension — contamination probe.** Novel entity perturbation; LLM vs fine-tuning drop on identical perturbed data. | `results/contamination/` |
+| 13 | `13_jnlpba_prep_and_finetune` | **Biomedical.** JNLPBA splits + tokenize + zero-shot + fine-tuning (Arm 1), scored on a matched 800-subset (+ full-test reference). | `results/jnlpba/` |
+| 14 | `14_jnlpba_llm` | **Biomedical.** JNLPBA LLM arm (Arm 3), 800-sentence cost cap. | `results/jnlpba/llm_jnlpba.csv` |
+| 15 | `15_aggregate_all_domains` | **Biomedical.** Three-domain data-efficiency + gap + per-type tables (reads only). | `results/three_domain/` |
 
-`ner_common_utils.py` is a legacy helper from an earlier version of the pipeline; the current
-notebooks (00–10) are self-contained and do **not** import it. It's kept for reference only.
+`ner_common_utils.py` is a legacy helper from an earlier version; the current notebooks are
+self-contained and do **not** import it. It's kept for reference only.
 
 ### Note on the two few-shot samplers (01 ↔ 02)
 
-The few-shot sampling logic appears in **two** places on purpose:
+The few-shot sampler appears in **two** places on purpose: `01`'s `sample_fewshot()` (diagnostic
+only, for the EDA coverage table) and `02`'s `stratified_sample_train()` (authoritative, writes
+the real `fewshot_splits/`). They use the *same* algorithm so the EDA numbers match the actual
+splits. **If you edit one, edit the other** — both carry a `KEEP IN SYNC` comment. (`01` runs
+before `02`, so it re-simulates rather than reading `02`'s output.)
 
-- `01` — `sample_fewshot()` — **diagnostic only**, used to print the EDA coverage table.
-- `02` — `stratified_sample_train()` — **authoritative**, writes the real `fewshot_splits/`.
+Other repeated helpers (`load_jsonl`, span extraction, the metric code) are duplicated so each
+notebook runs standalone in Colab — repetition, not conflict. The metric code across the
+fine-tuning and LLM notebooks is byte-identical on purpose, so cross-arm F1 is comparable.
 
-They are intentionally the *same* algorithm (identical 80/20 entity/non-entity stratification,
-seed, and shuffle order) so the EDA coverage numbers match the splits you actually train on.
-**If you edit one, edit the other** — otherwise the EDA table silently stops describing the
-real splits. Both function definitions carry a `KEEP IN SYNC` comment. (`01` runs before `02`,
-so it re-simulates rather than reading `02`'s output — this keeps EDA/coverage ahead of split
-creation in the pipeline order.)
+### Data processing lives in 00a → 00b → 02 → 03, not in 01
 
-Other repeated helpers (`load_jsonl`, entity-type/span extraction, the metric code) are
-duplicated deliberately so each notebook runs standalone in Colab — repetition, not conflict.
-The metric code in 05/06b/08/09 is byte-identical on purpose, so cross-arm F1 is comparable.
-
-### Data processing lives in 00 → 02 → 03, not in 01
-
-To avoid a common mix-up: `01` **does not process data**. It only reads the standardized JSONL
-from `00` and writes `eda_summary.json` (stats). The transforms the models depend on are:
-`00` (raw → common JSONL) → `02` (few-shot splits) → `03` (tokenize + BIO-align).
+`01` does **not** process data — it reads the standardized JSONL and writes only stats. The
+transforms the models depend on are: `00a`/`00b` (raw → common JSONL) → `02` (few-shot splits) →
+`03` (tokenize + BIO-align).
 
 ## Consistency guarantees across the pipeline
 
-- **One data schema:** every notebook consumes the common JSONL from 00.
-- **One set of few-shot splits:** all arms train/demonstrate on the exact files from 02.
-- **One metric:** typed micro-F1, boundary F1, and per-type F1 are computed with the same
-  `seqeval` logic in 05, 06b, 08, and 09, so cross-arm numbers are directly comparable.
-- **One evaluation set:** all arms evaluate on the **full** target test set (matched comparison).
-- **One recipe for arms 1 & 2:** 08 mirrors 05's hyperparameters exactly; the only difference
-  is the encoder starting point (DAP vs baseline).
-
-## Before you run
-
-1. **05 and 06b emit `per_type` and `train_seconds`** (needed by notebook 10 for the per-type
-   table and cost analysis). Both have been run.
-2. For **09**, supply an `OPENAI_API_KEY` (Colab secret, env var, temporary in-notebook paste,
-   or the hidden `getpass` prompt). It uses OpenAI `gpt-4o-mini`; without a key it falls back to
-   a weaker free local model (recorded per row, not interchangeable with the API results). The
-   OpenAI account needs prepaid credit — a few dollars covers the full run.
-3. **Mitigation result (06b):** the tuned mitigation matches naive few-shot (05) but does not
-   lift WNUT above the zero-shot baseline — i.e. the WNUT regression is intrinsic to the domain,
-   not a catastrophic-forgetting artifact. Report 06b as an ablation; keep 05 as the Arm 1 result.
+- **One data schema:** every notebook consumes the common JSONL from `00a`/`00b`.
+- **One set of few-shot splits:** all arms train/demonstrate on the exact files from `02`.
+- **One metric:** typed micro-F1, boundary F1, and per-type F1 via the same `seqeval` logic
+  everywhere, so cross-arm numbers are directly comparable.
+- **Matched evaluation sets:** WNUT/SciERC arms evaluate on the full target test set; the JNLPBA
+  fine-tuning and LLM arms both evaluate on the same fixed 800-sentence subset (seed 42).
+- **One recipe for arms 1 & 2:** 08 mirrors 05 exactly; the only difference is the encoder start
+  (DAP vs baseline).
 
 ## The 06a → 06b iteration (kept on purpose)
 
-We deliberately keep **both** mitigation notebooks to show the debugging process rather than
-just the final answer:
+We deliberately keep **both** mitigation notebooks to show the debugging process, not just the
+final answer. `06a` was our first attempt — the encoder learning rate (`5e-6`) was too
+conservative and the encoder stayed frozen for 2 of 8 epochs, so it **underfit** and scored below
+naive few-shot. `06b` raised the encoder LR to `2e-5` and shortened the freeze to 1 epoch, which
+fixed training; the corrected result matches naive fine-tuning but still cannot lift WNUT above
+the zero-shot baseline — evidence the WNUT regression is **intrinsic to the domain, not
+catastrophic forgetting**. Only `06b` feeds the aggregation.
 
-- **`06a`** — our first mitigation attempt. The encoder learning rate (`5e-6`) was too
-  conservative and the encoder stayed frozen for 2 of 8 epochs, so the model **underfit** and
-  scored *below* naive few-shot (05) — worst on SciERC.
-- **`06b`** — after diagnosing the underfitting, we raised the encoder LR to `2e-5` and shortened
-  the freeze to 1 epoch. This fixed the training, and the corrected result is what supports our
-  conclusion: mitigation matches naive fine-tuning but cannot lift WNUT above the zero-shot
-  baseline, so the WNUT regression is **intrinsic to the domain, not catastrophic forgetting**.
+## Reproducing / re-running
 
-Only `06b` feeds the aggregation in notebook 10 (`results/mitigated_retuned/`); `06a` writes to
-`results/mitigated/` and is illustrative only. The takeaway — a negative result reached through a
-fix — is exactly what the ablation is meant to demonstrate.
+1. **Keys:** `09`, `09b`, `09c`, `12`, `14` need an `OPENAI_API_KEY` (Colab secret, env var, or the
+   hidden prompt — never hardcode/commit the key). They use `gpt-4o-mini`; a few dollars of
+   prepaid credit covers all runs.
+2. **GPU** is needed for the fine-tuning / DAP notebooks (04–08, 13); the aggregation notebooks
+   (10, 11, 15) need neither GPU nor API.
+3. Most training/LLM notebooks are **resumable** (skip completed dataset/budget/seed or cache
+   per-sentence predictions), so an interrupted run picks up where it left off.
