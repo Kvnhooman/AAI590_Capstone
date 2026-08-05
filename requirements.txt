@@ -1,0 +1,11 @@
+# Documentation of the package versions actually used for the executed runs
+torch==2.12.1
+transformers==5.13.0
+datasets==5.0.0
+accelerate==1.14.0
+seqeval==1.2.2
+anthropic==0.116.0
+pandas==3.0.3
+numpy==2.5.1
+matplotlib==3.11.0
+seaborn==0.13.2
